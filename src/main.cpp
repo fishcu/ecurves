@@ -7,10 +7,12 @@
 #include <backends/imgui_impl_opengl3.h>
 #include <imgui.h>
 
+#include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
+#include <numeric>
 #include <vector>
 
 // Shader source code
@@ -28,7 +30,10 @@ const char* fragmentShaderSource = R"(
     layout(origin_upper_left) in vec4 gl_FragCoord;
     out vec4 fragColor;
     
+    uniform vec2 mousePos;
     uniform vec2 windowSize;
+
+    uniform int nearestIndex;
     uniform int pointCount;
     uniform samplerBuffer pointsTexture; // TBO for point data
 
@@ -38,17 +43,17 @@ const char* fragmentShaderSource = R"(
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
             float distance = length(gl_FragCoord.xy - point);
-            if (distance <= 5.0) {
-                fragColor = vec4(1.0, 0.0, 0.0, 1.0);
-                break;
-            }
+            if (distance <= (i == nearestIndex ? 8.0 : 5.0)) {
+                fragColor = vec4(i == nearestIndex ?  vec3(1.0, 0.5, 0.5) : vec3(1.0, 0.0, 0.0), 1.0);
+            }            
         }
     }
 )";
 
 // Function to find the index of the nearest point to a given position
 int FindNearestPoint(const glm::vec2& position,
-                     const std::vector<glm::vec2>& points, float threshold = 50.0f) {
+                     const std::vector<glm::vec2>& points,
+                     float threshold = 50.0f) {
     float minDistance = threshold;
     int nearestIndex = -1;
 
@@ -247,7 +252,9 @@ int main() {
     glTexBuffer(GL_TEXTURE_BUFFER, GL_RG32F, tbo);
 
     int nearestIndex = -1;
-    while (!glfwWindowShouldClose(app.window)) {
+    int nearestIdxWhenClicked = -1;
+    while (!glfwWindowShouldClose(app.window) &&
+           !glfwGetKey(app.window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         glfwPollEvents();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -263,6 +270,29 @@ int main() {
         ImGui::SameLine();
         ImGui::RadioButton("Move Points", &isPlacingPoints, 0);
 
+        // Point annotations
+        for (size_t i = 0; i < pointList.size(); ++i) {
+            const glm::vec2& point = pointList[i];
+            ImGui::SetNextWindowPos(ImVec2(point.x, point.y));
+            // Make the ImGui window transparent
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+            ImGui::PushStyleColor(
+                ImGuiCol_WindowBg,
+                ImVec4(0, 0, 0, 0));  // Transparent background
+            char windowName[64];
+            snprintf(windowName, sizeof(windowName), "Point Annotation %zu", i);
+            ImGui::Begin(
+                windowName, nullptr,
+                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                    ImGuiWindowFlags_NoInputs);
+            ImGui::Text("%zu", i);
+            ImGui::End();
+            ImGui::PopStyleVar(2);  // Pop the style changes
+            ImGui::PopStyleColor();
+        }
+
         ImGui::End();
         ImGui::Render();
 
@@ -274,6 +304,11 @@ int main() {
                     printf("adding point at %f %f\n", mousePos.x, mousePos.y);
 
                     pointList.push_back(glm::vec2(mousePos.x, mousePos.y));
+                    std::stable_sort(
+                        pointList.begin(), pointList.end(),
+                        [](const glm::vec2& a, const glm::vec2& b) {
+                            return a.x < b.x;
+                        });
 
                     glBindBuffer(GL_TEXTURE_BUFFER, tbo);
                     glBufferData(GL_TEXTURE_BUFFER,
@@ -281,22 +316,39 @@ int main() {
                                  pointList.data(), GL_DYNAMIC_DRAW);
                 }
             } else {
+                ImVec2 mousePos = ImGui::GetMousePos();
+                nearestIndex = FindNearestPoint(
+                    glm::vec2(mousePos.x, mousePos.y), pointList);
                 if (ImGui::IsMouseClicked(0)) {
-                    ImVec2 mousePos = ImGui::GetMousePos();
-                    nearestIndex = FindNearestPoint(
-                        glm::vec2(mousePos.x, mousePos.y), pointList);
-                    printf("Moving point %d\n", nearestIndex);
-                } else if (ImGui::IsMouseDragging(0, 0.0f) &&
-                           nearestIndex != -1) {
-                    ImVec2 mousePos = ImGui::GetMousePos();
-                    pointList[nearestIndex] = glm::vec2(mousePos.x, mousePos.y);
+                    nearestIdxWhenClicked = nearestIndex;
+                }
+                if (ImGui::IsMouseDragging(0, 0.0f) &&
+                    nearestIdxWhenClicked != -1) {
+                    std::vector<glm::vec2> pointListNew = pointList;
+                    pointListNew[nearestIdxWhenClicked] =
+                        glm::vec2(mousePos.x, mousePos.y);
+
+                    std::vector<size_t> indices(pointList.size());
+                    std::iota(indices.begin(), indices.end(), 0);
+                    std::stable_sort(indices.begin(), indices.end(),
+                              [&pointListNew](const size_t a, const size_t b) {
+                                  return pointListNew[a].x <= pointListNew[b].x;
+                              });
+
+                    for (size_t i = 0; i < pointList.size(); ++i) {
+                        const auto sortedIdx = indices[i];
+                        pointList[i] = pointListNew[sortedIdx];
+                        if (sortedIdx == nearestIdxWhenClicked) {
+                            nearestIdxWhenClicked = i;
+                        }
+                    }
 
                     glBindBuffer(GL_TEXTURE_BUFFER, tbo);
                     glBufferData(GL_TEXTURE_BUFFER,
                                  pointList.size() * sizeof(glm::vec2),
                                  pointList.data(), GL_DYNAMIC_DRAW);
                 } else {
-                    nearestIndex = -1;
+                    nearestIdxWhenClicked = -1;
                 }
             }
         }
@@ -306,11 +358,23 @@ int main() {
 
         glUseProgram(shaderProgram);
 
+        // Set the mousePos uniform in the fragment shader
+        ImVec2 mousePos = ImGui::GetMousePos();
+        GLint mousePosLocation =
+            glGetUniformLocation(shaderProgram, "mousePos");
+        glUniform2f(mousePosLocation, static_cast<GLfloat>(mousePos.x),
+                    static_cast<GLfloat>(mousePos.y));
+
         // Set the windowSize uniform in the fragment shader
         GLint windowSizeLocation =
             glGetUniformLocation(shaderProgram, "windowSize");
         glUniform2f(windowSizeLocation, static_cast<GLfloat>(app.width),
                     static_cast<GLfloat>(app.height));
+
+        // Set the nearestIndex uniform in the fragment shader
+        GLint nearestIndexLocation =
+            glGetUniformLocation(shaderProgram, "nearestIndex");
+        glUniform1i(nearestIndexLocation, static_cast<GLint>(nearestIndex));
 
         // Bind the TBO to the texture unit and set it as a uniform
         glActiveTexture(GL_TEXTURE0);
