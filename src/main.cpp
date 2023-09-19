@@ -39,7 +39,16 @@ const char* fragmentShaderSource = R"(
 
     void main() {
         fragColor = vec4(0.0);
-
+        
+        for (int i = 0; i < pointCount -1 ; ++i) {
+            if (gl_FragCoord.x > texelFetch(pointsTexture, i).x && gl_FragCoord.x < texelFetch(pointsTexture, i + 1).x) {
+                vec2 line = texelFetch(pointsTexture, i + 1).xy - texelFetch(pointsTexture, i).xy;
+                vec2 toPoint = gl_FragCoord.xy - texelFetch(pointsTexture, i).xy;
+                if (line.x * toPoint.y - toPoint.x * line.y > 0) {
+                    fragColor = vec4(1.0);
+                }
+            }
+        }
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
             float distance = length(gl_FragCoord.xy - point);
@@ -273,20 +282,25 @@ int main() {
         // Point annotations
         for (size_t i = 0; i < pointList.size(); ++i) {
             const glm::vec2& point = pointList[i];
-            ImGui::SetNextWindowPos(ImVec2(point.x, point.y));
             // Make the ImGui window transparent
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
             ImGui::PushStyleColor(
                 ImGuiCol_WindowBg,
                 ImVec4(0, 0, 0, 0));  // Transparent background
-            char windowName[64];
-            snprintf(windowName, sizeof(windowName), "Point Annotation %zu", i);
+            char idxString[64];
+            snprintf(idxString, sizeof(idxString), "%zu", i);
+            // Calculate the size of the text
+            ImVec2 textSize = ImGui::CalcTextSize(idxString);
+            ImVec2 textPos(point.x - textSize.x * 0.5 * app.dpi_scale,
+                           point.y - textSize.y * app.dpi_scale - 5.0f);
+            ImGui::SetNextWindowPos(textPos);
             ImGui::Begin(
-                windowName, nullptr,
+                idxString, nullptr,
                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                    ImGuiWindowFlags_NoInputs);
+                    ImGuiWindowFlags_NoInputs |
+                    ImGuiWindowFlags_NoSavedSettings);
             ImGui::Text("%zu", i);
             ImGui::End();
             ImGui::PopStyleVar(2);  // Pop the style changes
