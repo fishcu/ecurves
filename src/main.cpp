@@ -33,15 +33,12 @@ const char* fragmentShaderSource = R"(
     uniform samplerBuffer pointsTexture; // TBO for point data
 
     void main() {
-        fragColor = vec4(0.0); // Initialize with no color
+        fragColor = vec4(0.0);
 
-        fragColor.xy = gl_FragCoord.xy / windowSize;
-
-        // Iterate through the points
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
             float distance = length(gl_FragCoord.xy - point);
-            if (distance <= 3.0) {
+            if (distance <= 5.0) {
                 fragColor = vec4(1.0, 0.0, 0.0, 1.0);
                 break;
             }
@@ -51,8 +48,8 @@ const char* fragmentShaderSource = R"(
 
 // Function to find the index of the nearest point to a given position
 int FindNearestPoint(const glm::vec2& position,
-                     const std::vector<glm::vec2>& points) {
-    float minDistance = FLT_MAX;
+                     const std::vector<glm::vec2>& points, float threshold = 50.0f) {
+    float minDistance = threshold;
     int nearestIndex = -1;
 
     for (size_t i = 0; i < points.size(); ++i) {
@@ -68,26 +65,23 @@ int FindNearestPoint(const glm::vec2& position,
 
 struct App {
     GLFWwindow* window;
-    int width = 1024, height = 768;
+    int width = 1600, height = 900;
     float dpi_scale = 2.0;
 
     // Used for drawing full-screen quad
     GLuint VBO, VAO;
 
     int init() {
-        // Initialize GLFW and create a window
         if (!glfwInit()) {
             std::cerr << "Failed to initialize GLFW" << std::endl;
             return -1;
         }
 
-        // Configure GLFW
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
-        // Create a windowed mode window and its OpenGL context
         window = glfwCreateWindow(width, height, "ecurves", NULL, NULL);
         if (!window) {
             std::cerr << "Failed to create GLFW window" << std::endl;
@@ -95,37 +89,26 @@ struct App {
             return -1;
         }
 
-        // Set up the window resize callback
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, &App::FramebufferSizeCallback);
 
-        // vsync
+        // Vsync
         glfwSwapInterval(1);
 
-        // Make the window's context current
         glfwMakeContextCurrent(window);
 
-        // Initialize GLAD
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
             std::cerr << "Failed to initialize GLAD" << std::endl;
             return -1;
         }
 
-        // Setup ImGui context and binding to GLFW and OpenGL3
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
 
-        // Set ImGui's DPI scaling callback to glfwGetWindowContentScale
-        // glfwSetWindowContentScaleCallback(
-        //     window, [](GLFWwindow*, float xscale, float yscale) {
-        //         ImGuiIO& io = ImGui::GetIO();
-        //         io.DisplayFramebufferScale = ImVec2(xscale, yscale);
-        //     });
         ImGui_ImplGlfw_InitForOpenGL(window, true);
         ImGui_ImplOpenGL3_Init("#version 330");
-        // ImGui::GetIO().FontGlobalScale = dpi_scale;
-        io.DisplayFramebufferScale = ImVec2(dpi_scale, dpi_scale);
+        io.FontGlobalScale = dpi_scale;
 
         // Set up vertex data for two triangles to cover the viewport
         float vertices[] = {
@@ -135,22 +118,18 @@ struct App {
             1.0f,  -1.0f,
         };
 
-        // Generate a vertex buffer object (VBO) and vertex array object (VAO)
         glGenVertexArrays(1, &VAO);
         glGenBuffers(1, &VBO);
 
         // Bind the VAO first, then bind and set vertex buffer(s), and then
         // configure vertex attributes(s)
         glBindVertexArray(VAO);
-
         glBindBuffer(GL_ARRAY_BUFFER, VBO);
         glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices,
                      GL_STATIC_DRAW);
-
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
                               (void*)0);
         glEnableVertexAttribArray(0);
-
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
 
@@ -163,19 +142,15 @@ struct App {
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         // Render ImGui
-        ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        // Swap front and back buffers
         glfwSwapBuffers(window);
     }
 
     void cleanup() {
-        // Cleanup
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
-
         glDeleteBuffers(1, &VBO);
         glDeleteVertexArrays(1, &VAO);
         glfwTerminate();
@@ -184,29 +159,22 @@ struct App {
     void framebufferSizeCallback(int new_width, int new_height) {
         glViewport(0, 0, new_width, new_height);
 
-        // Retrieve the framebuffer size in physical pixels
         int fb_w, fb_h;
         glfwGetFramebufferSize(window, &fb_w, &fb_h);
 
-        // Calculate the DPI scaling factor
         dpi_scale =
             2.0f * static_cast<float>(fb_w) / static_cast<float>(new_width);
 
-        // Update Dear ImGui's scaling factor
-        ImGui::GetIO().DisplayFramebufferScale = ImVec2(dpi_scale, dpi_scale);
+        ImGui::GetIO().FontGlobalScale = dpi_scale;
 
         width = new_width;
         height = new_height;
-
         printf("new window size: %d %d. New DPI: %f\n", width, height,
                dpi_scale);
     }
     static void FramebufferSizeCallback(GLFWwindow* window, int width,
                                         int height) {
-        // Retrieve the `MyApp` instance from the GLFW window user pointer
         App* app = static_cast<App*>(glfwGetWindowUserPointer(window));
-
-        // Call the member function
         app->framebufferSizeCallback(width, height);
     }
 };
@@ -265,7 +233,7 @@ int main() {
     glDeleteShader(vertexShader);
 
     // Create a Texture Buffer Object (TBO) for points
-    std::vector<glm::vec2> pointList;  // List to store points
+    std::vector<glm::vec2> pointList;
     GLuint tbo;
     glGenBuffers(1, &tbo);
     glBindBuffer(GL_TEXTURE_BUFFER, tbo);
@@ -278,72 +246,64 @@ int main() {
     glBindTexture(GL_TEXTURE_BUFFER, pointsTexture);
     glTexBuffer(GL_TEXTURE_BUFFER, GL_RG32F, tbo);
 
-    // Main loop
     int nearestIndex = -1;
     while (!glfwWindowShouldClose(app.window)) {
         glfwPollEvents();
 
-        // Start the ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Create a Dear ImGui window for the 2D viewport
         ImGui::Begin("ecurves");
+        // Initial window pos
+        ImGui::SetWindowPos(ImVec2(100, 100), ImGuiCond_Once);
 
-        // Radio buttons to switch between placing and moving points
         static int isPlacingPoints = 1;
         ImGui::RadioButton("Place Points", &isPlacingPoints, 1);
         ImGui::SameLine();
         ImGui::RadioButton("Move Points", &isPlacingPoints, 0);
 
-        // Check for mouse clicks and add/move points based on the mode
-        if (isPlacingPoints == 1) {
-            // Placing points mode (add points)
-            if (ImGui::IsMouseClicked(0)) {
-                ImVec2 mousePos = ImGui::GetMousePos();
-                printf("adding point at %f %f\n", mousePos.x, mousePos.y);
+        ImGui::End();
+        ImGui::Render();
 
-                // Add the point to the list
-                pointList.push_back(glm::vec2(mousePos.x, mousePos.y));
+        // Only do mouse events if Imgui doesn't capture them
+        if (!ImGui::GetIO().WantCaptureMouse) {
+            if (isPlacingPoints == 1) {
+                if (ImGui::IsMouseClicked(0)) {
+                    ImVec2 mousePos = ImGui::GetMousePos();
+                    printf("adding point at %f %f\n", mousePos.x, mousePos.y);
 
-                // Update the TBO with new data
-                glBindBuffer(GL_TEXTURE_BUFFER, tbo);
-                glBufferData(GL_TEXTURE_BUFFER,
-                             pointList.size() * sizeof(glm::vec2),
-                             pointList.data(), GL_DYNAMIC_DRAW);
-            }
-        } else {
-            // Moving points mode
-            if (ImGui::IsMouseClicked(0)) {
-                ImVec2 mousePos = ImGui::GetMousePos();
-                // Find the nearest point and set it as the moving point
-                nearestIndex = FindNearestPoint(
-                    glm::vec2(mousePos.x, mousePos.y), pointList);
-            } else if (ImGui::IsMouseDragging(0) && nearestIndex != -1) {
-                // Move the selected point
-                ImVec2 mousePos = ImGui::GetMousePos();
-                pointList[nearestIndex] = glm::vec2(mousePos.x, mousePos.y);
+                    pointList.push_back(glm::vec2(mousePos.x, mousePos.y));
 
-                // Update the TBO with new data
-                glBindBuffer(GL_TEXTURE_BUFFER, tbo);
-                glBufferData(GL_TEXTURE_BUFFER,
-                             pointList.size() * sizeof(glm::vec2),
-                             pointList.data(), GL_DYNAMIC_DRAW);
+                    glBindBuffer(GL_TEXTURE_BUFFER, tbo);
+                    glBufferData(GL_TEXTURE_BUFFER,
+                                 pointList.size() * sizeof(glm::vec2),
+                                 pointList.data(), GL_DYNAMIC_DRAW);
+                }
             } else {
-                // Reset the moving point
-                nearestIndex = -1;
+                if (ImGui::IsMouseClicked(0)) {
+                    ImVec2 mousePos = ImGui::GetMousePos();
+                    nearestIndex = FindNearestPoint(
+                        glm::vec2(mousePos.x, mousePos.y), pointList);
+                    printf("Moving point %d\n", nearestIndex);
+                } else if (ImGui::IsMouseDragging(0, 0.0f) &&
+                           nearestIndex != -1) {
+                    ImVec2 mousePos = ImGui::GetMousePos();
+                    pointList[nearestIndex] = glm::vec2(mousePos.x, mousePos.y);
+
+                    glBindBuffer(GL_TEXTURE_BUFFER, tbo);
+                    glBufferData(GL_TEXTURE_BUFFER,
+                                 pointList.size() * sizeof(glm::vec2),
+                                 pointList.data(), GL_DYNAMIC_DRAW);
+                } else {
+                    nearestIndex = -1;
+                }
             }
         }
 
-        // End the ImGui window
-        ImGui::End();
-
-        // Clear the screen
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // Use the shader program
         glUseProgram(shaderProgram);
 
         // Set the windowSize uniform in the fragment shader
