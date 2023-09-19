@@ -324,24 +324,8 @@ int main() {
                 }
                 if (ImGui::IsMouseDragging(0, 0.0f) &&
                     nearestIdxWhenClicked != -1) {
-                    std::vector<glm::vec2> pointListNew = pointList;
-                    pointListNew[nearestIdxWhenClicked] =
+                    pointList[nearestIdxWhenClicked] =
                         glm::vec2(mousePos.x, mousePos.y);
-
-                    std::vector<size_t> indices(pointList.size());
-                    std::iota(indices.begin(), indices.end(), 0);
-                    std::stable_sort(indices.begin(), indices.end(),
-                              [&pointListNew](const size_t a, const size_t b) {
-                                  return pointListNew[a].x <= pointListNew[b].x;
-                              });
-
-                    for (size_t i = 0; i < pointList.size(); ++i) {
-                        const auto sortedIdx = indices[i];
-                        pointList[i] = pointListNew[sortedIdx];
-                        if (sortedIdx == nearestIdxWhenClicked) {
-                            nearestIdxWhenClicked = i;
-                        }
-                    }
 
                     glBindBuffer(GL_TEXTURE_BUFFER, tbo);
                     glBufferData(GL_TEXTURE_BUFFER,
@@ -349,6 +333,16 @@ int main() {
                                  pointList.data(), GL_DYNAMIC_DRAW);
                 } else {
                     nearestIdxWhenClicked = -1;
+
+                    std::stable_sort(
+                        pointList.begin(), pointList.end(),
+                        [](const glm::vec2& a, const glm::vec2& b) {
+                            return a.x < b.x;
+                        });
+                    glBindBuffer(GL_TEXTURE_BUFFER, tbo);
+                    glBufferData(GL_TEXTURE_BUFFER,
+                                 pointList.size() * sizeof(glm::vec2),
+                                 pointList.data(), GL_DYNAMIC_DRAW);
                 }
             }
         }
