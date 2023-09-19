@@ -324,8 +324,31 @@ int main() {
                 }
                 if (ImGui::IsMouseDragging(0, 0.0f) &&
                     nearestIdxWhenClicked != -1) {
-                    pointList[nearestIdxWhenClicked] =
+                    std::vector<glm::vec2> pointListNew = pointList;
+                    pointListNew[nearestIdxWhenClicked] =
                         glm::vec2(mousePos.x, mousePos.y);
+
+                    const auto nearestPoint =
+                        (nearestIndex != -1 ? pointListNew[nearestIndex]
+                                            : glm::vec2{-1.0f, -1.0f});
+                    const auto nearestPointWhenClicked =
+                        pointListNew[nearestIdxWhenClicked];
+
+                    std::stable_sort(
+                        pointListNew.begin(), pointListNew.end(),
+                        [](const glm::vec2& a, const glm::vec2& b) {
+                            return a.x < b.x;
+                        });
+
+                    for (int i = 0; i < pointList.size(); ++i) {
+                        if (nearestPoint == pointListNew[i]) {
+                            nearestIndex = i;
+                        }
+                        if (nearestPointWhenClicked == pointListNew[i]) {
+                            nearestIdxWhenClicked = i;
+                        }
+                        pointList[i] = pointListNew[i];
+                    }
 
                     glBindBuffer(GL_TEXTURE_BUFFER, tbo);
                     glBufferData(GL_TEXTURE_BUFFER,
@@ -333,16 +356,6 @@ int main() {
                                  pointList.data(), GL_DYNAMIC_DRAW);
                 } else {
                     nearestIdxWhenClicked = -1;
-
-                    std::stable_sort(
-                        pointList.begin(), pointList.end(),
-                        [](const glm::vec2& a, const glm::vec2& b) {
-                            return a.x < b.x;
-                        });
-                    glBindBuffer(GL_TEXTURE_BUFFER, tbo);
-                    glBufferData(GL_TEXTURE_BUFFER,
-                                 pointList.size() * sizeof(glm::vec2),
-                                 pointList.data(), GL_DYNAMIC_DRAW);
                 }
             }
         }
