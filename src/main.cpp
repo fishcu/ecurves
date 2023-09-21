@@ -35,26 +35,96 @@ const char* fragmentShaderSource = R"(
 
     uniform int nearestIndex;
     uniform int pointCount;
-    uniform samplerBuffer pointsTexture; // TBO for point data
+    uniform samplerBuffer pointsTexture;  // TBO for point data
+
+    float y_eval(vec2 p0, vec2 delta, float x_t) {
+        return delta.y * (x_t - p0.x) / delta.x + p0.y;
+    }
+
+    float x_eval(vec2 p0, vec2 delta, float y_t) {
+        return delta.x * (y_t - p0.y) / delta.y + p0.x;
+    }
+
+    float line_square_overlap(vec2 p0, vec2 p1, vec4 sq) {
+        vec2 delta = p1 - p0;
+
+        if (delta.x < 1.0e-8) {
+            return 0.0;
+        }
+
+        float x_start = clamp(p0.x, sq.x, sq.z);
+        float x_end = clamp(p1.x, sq.x, sq.z);
+        if (abs(delta.y) < 1.0e-8) {
+            float y = clamp(p0.y, sq.y, sq.w);
+            return (x_end - x_start) * (sq.w - y);
+        } else if (delta.y > 0.0) {
+            // where line hits upper border of square
+            float x_intersect_start =
+                clamp(x_eval(p0, delta, sq.y), x_start, x_end);
+            float y_at_x_intersect_start =
+                clamp(y_eval(p0, delta, x_intersect_start), sq.y, sq.w);
+            // where line hits lower border of square
+            float x_intersect_end = clamp(x_eval(p0, delta, sq.w), x_start, x_end);
+            float y_at_x_intersect_end = clamp(y_eval(p0, delta, x_intersect_end), sq.y, sq.w);
+            // overlap is:
+            return (x_intersect_start - x_start) * (sq.w - y_at_x_intersect_start) +
+                (x_intersect_end - x_intersect_start) *
+                    (sq.w -
+                        0.5 * (y_at_x_intersect_start + y_at_x_intersect_end));
+        } else {
+            // where line hits upper border of square
+            float x_intersect_start =
+                clamp(x_eval(p0, delta, sq.w), x_start, x_end);
+            float y_at_x_intersect_start = clamp(y_eval(p0, delta, x_intersect_start), sq.y, sq.w);
+            // where line hits lower border of square
+            float x_intersect_end = clamp(x_eval(p0, delta, sq.y), x_start, x_end);
+            float y_at_x_intersect_end = clamp(y_eval(p0, delta, x_intersect_end), sq.y, sq.w);
+            // overlap is:
+            return (x_intersect_end - x_intersect_start) *
+                    (sq.w -
+                        0.5 * (y_at_x_intersect_start + y_at_x_intersect_end)) +
+                (x_end - x_intersect_end) * (sq.w - y_at_x_intersect_end);
+        }
+    }
 
     void main() {
         fragColor = vec4(0.0);
-        
-        for (int i = 0; i < pointCount -1 ; ++i) {
-            if (gl_FragCoord.x > texelFetch(pointsTexture, i).x && gl_FragCoord.x < texelFetch(pointsTexture, i + 1).x) {
-                vec2 line = texelFetch(pointsTexture, i + 1).xy - texelFetch(pointsTexture, i).xy;
-                vec2 toPoint = gl_FragCoord.xy - texelFetch(pointsTexture, i).xy;
-                if (line.x * toPoint.y - toPoint.x * line.y > 0) {
-                    fragColor = vec4(1.0);
+
+        if (pointCount >= 2) {
+            float sq_size = 20.0;
+            vec4 sq = vec4(gl_FragCoord.x - sq_size * 0.5, gl_FragCoord.y - sq_size * 0.5, gl_FragCoord.x + sq_size * 0.5, gl_FragCoord.y + sq_size * 0.5);
+            float overlap = 0.0;
+            if (gl_FragCoord.x < texelFetch(pointsTexture, 0).x) {
+                // All points are on the right of this fragment
+                vec2 p0 = texelFetch(pointsTexture, 0).xy;
+                vec2 p1 = texelFetch(pointsTexture, 1).xy;
+                vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
+                overlap += line_square_overlap(p0, p1, overlapping_square);
+                
+            } else if (gl_FragCoord.x >= texelFetch(pointsTexture, pointCount - 1).x) {
+                // All points on the left
+                vec2 p0 = texelFetch(pointsTexture, pointCount - 2).xy;
+                vec2 p1 = texelFetch(pointsTexture, pointCount - 1).xy;
+                vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
+                overlap += line_square_overlap(p0, p1, overlapping_square);
+            } else {
+                // Valid points on either side
+                for (int i = 0; i < pointCount - 1; ++i) {
+                        vec2 p0 = texelFetch(pointsTexture, i).xy;
+                        vec2 p1 = texelFetch(pointsTexture, i + 1).xy;
+                        overlap += line_square_overlap(p0, p1, sq);
                 }
             }
+            fragColor = vec4(vec3(smoothstep(0.0, sq_size * sq_size, overlap)), 1.0);
         }
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
             float distance = length(gl_FragCoord.xy - point);
-            if (distance <= (i == nearestIndex ? 8.0 : 5.0)) {
-                fragColor = vec4(i == nearestIndex ?  vec3(1.0, 0.5, 0.5) : vec3(1.0, 0.0, 0.0), 1.0);
-            }            
+            if (distance <= (i == nearestIndex ? 8.0 : 0.0)) {
+                fragColor = vec4(
+                    i == nearestIndex ? vec3(1.0, 0.5, 0.5) : vec3(1.0, 0.0, 0.0),
+                    1.0);
+            }
         }
     }
 )";
@@ -292,7 +362,7 @@ int main() {
             snprintf(idxString, sizeof(idxString), "%zu", i);
             // Calculate the size of the text
             ImVec2 textSize = ImGui::CalcTextSize(idxString);
-            ImVec2 textPos(point.x - textSize.x * 0.5 * app.dpi_scale,
+            ImVec2 textPos(point.x - textSize.x * 0.5f * app.dpi_scale,
                            point.y - textSize.y * app.dpi_scale - 5.0f);
             ImGui::SetNextWindowPos(textPos);
             ImGui::Begin(
