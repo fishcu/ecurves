@@ -428,7 +428,7 @@ int main() {
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
             ImGui::PushStyleColor(
                 ImGuiCol_WindowBg,
-                ImVec4(0, 0, 0, 0));  // Transparent background
+                ImVec4(0.f, 0.f, 0.f, 0.5f));  // Transparent background
             char idxString[64];
             snprintf(idxString, sizeof(idxString), "%zu", i);
             // Calculate the size of the text
