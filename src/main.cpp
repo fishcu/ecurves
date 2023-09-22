@@ -87,6 +87,35 @@ const char* fragmentShaderSource = R"(
         }
     }
 
+    float line_segment_sdf(vec2 p0, vec2 p1, vec2 x) {
+        vec2 x_p0 = x - p0;
+        vec2 line = p1 - p0;
+        float h = clamp(dot(x_p0, line) / dot(line, line), 0.0, 1.0);
+        return length(x_p0 - line * h) * sign(x_p0.x * line.y - x_p0.y * line.x);
+    }
+
+    float line_polygon_sdf(in vec2 p0, in vec2 p1, in vec2 x) {
+        if (abs(p1.x - p0.x) < 1.0e-8) {
+            // return inf
+            return 1.0e20;
+        }
+
+        vec2 line = p1 - p0;
+
+        vec2 v0 = x - p0;
+
+        vec2 pq0 = v0 - line * clamp(dot(v0, line) / dot(line, line), 0.0, 1.0);
+        vec2 pq1 = x - vec2(p0.x, max(x.y, p0.y));
+        vec2 pq2 = x - vec2(p1.x, max(x.y, p1.y));
+
+        float s = p0.x - p1.x;
+        vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * line.y - v0.y * line.x)),
+                        vec2(dot(pq1, pq1), s * (p0.x - x.x))),
+                    vec2(dot(pq2, pq2), s * (x.x - p1.x)));
+
+        return -sqrt(d.x) * (float(d.y > 0.0) * 2.0 - 1.0);
+    }
+
     void main() {
         fragColor = vec4(0.0);
 
@@ -98,24 +127,27 @@ const char* fragmentShaderSource = R"(
                 // All points are on the right of this fragment
                 vec2 p0 = texelFetch(pointsTexture, 0).xy;
                 vec2 p1 = texelFetch(pointsTexture, 1).xy;
-                vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
-                overlap += line_square_overlap(p0, p1, overlapping_square);
-                
+                // vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
+                // overlap += line_square_overlap(p0, p1, overlapping_square);
+                overlap += 1.0 - smoothstep(-0.5 * sq_size, 0.5 * sq_size, line_polygon_sdf(p0, p1, gl_FragCoord.xy));
             } else if (gl_FragCoord.x >= texelFetch(pointsTexture, pointCount - 1).x) {
                 // All points on the left
                 vec2 p0 = texelFetch(pointsTexture, pointCount - 2).xy;
                 vec2 p1 = texelFetch(pointsTexture, pointCount - 1).xy;
-                vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
-                overlap += line_square_overlap(p0, p1, overlapping_square);
+                // vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
+                // overlap += line_square_overlap(p0, p1, overlapping_square);
+                overlap += 1.0 - smoothstep(-0.5 * sq_size, 0.5 * sq_size, line_polygon_sdf(p0, p1, gl_FragCoord.xy));
             } else {
                 // Valid points on either side
                 for (int i = 0; i < pointCount - 1; ++i) {
                         vec2 p0 = texelFetch(pointsTexture, i).xy;
                         vec2 p1 = texelFetch(pointsTexture, i + 1).xy;
-                        overlap += line_square_overlap(p0, p1, sq);
+                        // overlap += line_square_overlap(p0, p1, sq);
+                        overlap += 1.0 - smoothstep(-0.5 * sq_size, 0.5 * sq_size, line_polygon_sdf(p0, p1, gl_FragCoord.xy));
                 }
             }
-            fragColor = vec4(vec3(smoothstep(0.0, sq_size * sq_size, overlap)), 1.0);
+            // fragColor = vec4(vec3(smoothstep(0.0, sq_size * sq_size, overlap)), 1.0);
+            fragColor = vec4(vec3(overlap), 1.0);
         }
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
