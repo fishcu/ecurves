@@ -37,6 +37,44 @@ const char* fragmentShaderSource = R"(
     uniform int pointCount;
     uniform samplerBuffer pointsTexture;  // TBO for point data
 
+    float DigitBin(const in int x) {
+        return x == 0   ? 480599.0
+            : x == 1 ? 139810.0
+            : x == 2 ? 476951.0
+            : x == 3 ? 476999.0
+            : x == 4 ? 350020.0
+            : x == 5 ? 464711.0
+            : x == 6 ? 464727.0
+            : x == 7 ? 476228.0
+            : x == 8 ? 481111.0
+            : x == 9 ? 481095.0
+                        : 0.0;
+    }
+
+    float PrintValue(vec2 fragCoord, vec2 pixelCoord, vec2 fontSize, float value,
+                    float digits, float decimals) {
+        vec2 charCoord = (fragCoord - pixelCoord) / fontSize;
+        if (charCoord.y < 0.0 || charCoord.y >= 1.0) return 0.0;
+        float bits = 0.0;
+        float digitIndex1 = digits - floor(charCoord.x) + 1.0;
+        if (-digitIndex1 <= decimals) {
+            float pow1 = pow(10.0, digitIndex1);
+            float absValue = abs(value);
+            float pivot = max(absValue, 1.5) * 10.0;
+            if (pivot < pow1) {
+                if (value < 0.0 && pivot >= pow1 * 0.1) bits = 1792.0;
+            } else if (digitIndex1 == 0.0) {
+                if (decimals > 0.0) bits = 2.0;
+            } else {
+                value = digitIndex1 < 0.0 ? fract(absValue) : absValue * 10.0;
+                bits = DigitBin(int(mod(value / pow1, 10.0)));
+            }
+        }
+        return floor(mod(bits / pow(2.0, floor(fract(charCoord.x) * 4.0) +
+                                            floor(charCoord.y * 5.0) * 4.0),
+                        2.0));
+    }
+
     float y_eval(vec2 p0, vec2 delta, float x_t) {
         return delta.y * (x_t - p0.x) / delta.x + p0.y;
     }
@@ -192,43 +230,31 @@ const char* fragmentShaderSource = R"(
         }
 #endif
 
-        if (pointCount >= 2) {
+        if (pointCount >= 4) {
             float scaling = 1.0/100.0;
             vec2 p = scaling * texelFetch(pointsTexture, 0).xy;
-            // vec2 r = scaling * texelFetch(pointsTexture, 1).xy;
-            // vec2 s = scaling * texelFetch(pointsTexture, 2).xy;
             vec2 q = scaling * texelFetch(pointsTexture, 3).xy;
             
             vec2 r = scaling * texelFetch(pointsTexture, 1).xy - p;
             vec2 s = q - scaling * texelFetch(pointsTexture, 2).xy;
 
             // Build LSE
-            vec4 b = vec4(-1.0, -1.0, 0.0, 0.0);
-            // vec4 b = vec4(-1.0, -1.0, -1.0, -1.0);
-            // mat4 A = mat4(p.x * p.x, p.y * p.y      , 2.0 * p.x, 2.0 * p.y,
-            //               q.x * q.x, q.y * q.y      , 2.0 * q.x, 2.0 * q.y,
-            //               p.x      , p.y * r.y / r.x, 1.0,       r.y / r.x,
-            //               q.x      , q.y * s.y / s.x, 1.0,       s.y / s.x);
-            // mat4 A = mat4(p.x * p.x, p.y * p.y, 2.0 * p.x, 2.0 * p.y,
-            //               q.x * q.x, q.y * q.y, 2.0 * q.x, 2.0 * q.y,
-            //               r.x * r.x, r.y * r.y, 2.0 * r.x, 2.0 * r.y,
-            //               s.x * s.x, s.y * s.y, 2.0 * s.x, 2.0 * s.y);
             mat4 A = mat4(p.x * p.x, p.y * p.y, p.x, p.y,
                           q.x * q.x, q.y * q.y, q.x, q.y,
                           2.0 * p.x * r.x, 2.0 * p.y * r.y, r.x, r.y,
                           2.0 * q.x * s.x, 2.0 * q.y * s.y, s.x, s.y);
+             vec4 b = vec4(-1.0, -1.0, 0.0, 0.0);
+
             // Solve Ax = b for x
             mat4 A_inv = inverse(transpose(A));
             vec4 x = A_inv * b;
+
+            // Normalize inside/outside
             float offset = 1.0;
             offset *= sign(x[0]);
             x *= sign(x[0]);
-
-
-            // float A_ = x[0];
-            // float C = x[1];
-            // float D = x[2];
-            // float E = x[3];
+            offset *= sign(x[1]);
+            x *= sign(x[1]);
 
             float x_sc = scaling * gl_FragCoord.x;
             float y_sc = scaling * gl_FragCoord.y;
@@ -237,20 +263,15 @@ const char* fragmentShaderSource = R"(
                      + x[2] * x_sc
                      + x[3] * y_sc
                      + offset;
-
-            // vec2 c = vec2(-D / A_, -E / C);
-            // vec2 a = vec2(sqrt(-1.0 / A_ + D * D / (A_ * A_) + E * E / (A_ * C)),
-            //               sqrt(-1.0 / A_ + D * D / (A_ * C) + E * E / (C * C)));
-
-            // vec2 a = sqrt(vec2(1.0 / A_, 1.0 / C));
-            // vec2 c = vec2(- 0.5 * B / A_, -0.5 * D / C);
-
-            // vec2 delta = (gl_FragCoord.xy * scaling - c) / a;
-            // float d = dot(delta, delta) - 1.0;
-            if (d < 0.0) {
+            
+            if (/*sign(x[0]) == sign(x[1]) &&*/ d < 0.0) {
                 fragColor = vec4(1.0);
             }
-            // fragColor = vec4(vec3(1- d + 0.5), 1.0);
+
+            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 400), vec2(16, 32), x[0], 5.0, 5.0));
+            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 300), vec2(16, 32), x[1], 5.0, 5.0));
+            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 200), vec2(16, 32), x[2], 5.0, 5.0));
+            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 100), vec2(16, 32), x[3], 5.0, 5.0));
         }
 
         for (int i = 0; i < pointCount; ++i) {
