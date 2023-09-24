@@ -134,8 +134,10 @@ const char* fragmentShaderSource = R"(
     void main() {
         fragColor = vec4(0.0);
 
+// Draw polygons
+#if 0
         if (pointCount >= 2) {
-            float sq_size = 100.0;
+            float sq_size = 10.0;
             vec4 sq = vec4(gl_FragCoord.x - sq_size * 0.5, gl_FragCoord.y - sq_size * 0.5, gl_FragCoord.x + sq_size * 0.5, gl_FragCoord.y + sq_size * 0.5);
             float overlap = 0.0;
             // if (gl_FragCoord.x < texelFetch(pointsTexture, 0).x) {
@@ -188,10 +190,73 @@ const char* fragmentShaderSource = R"(
             // fragColor = vec4(vec3(smoothstep(0.0, sq_size * sq_size, overlap)), 1.0);
             fragColor = vec4(vec3(overlap), 1.0);
         }
+#endif
+
+        if (pointCount >= 2) {
+            float scaling = 1.0/100.0;
+            vec2 p = scaling * texelFetch(pointsTexture, 0).xy;
+            // vec2 r = scaling * texelFetch(pointsTexture, 1).xy;
+            // vec2 s = scaling * texelFetch(pointsTexture, 2).xy;
+            vec2 q = scaling * texelFetch(pointsTexture, 3).xy;
+            
+            vec2 r = scaling * texelFetch(pointsTexture, 1).xy - p;
+            vec2 s = q - scaling * texelFetch(pointsTexture, 2).xy;
+
+            // Build LSE
+            vec4 b = vec4(-1.0, -1.0, 0.0, 0.0);
+            // vec4 b = vec4(-1.0, -1.0, -1.0, -1.0);
+            // mat4 A = mat4(p.x * p.x, p.y * p.y      , 2.0 * p.x, 2.0 * p.y,
+            //               q.x * q.x, q.y * q.y      , 2.0 * q.x, 2.0 * q.y,
+            //               p.x      , p.y * r.y / r.x, 1.0,       r.y / r.x,
+            //               q.x      , q.y * s.y / s.x, 1.0,       s.y / s.x);
+            // mat4 A = mat4(p.x * p.x, p.y * p.y, 2.0 * p.x, 2.0 * p.y,
+            //               q.x * q.x, q.y * q.y, 2.0 * q.x, 2.0 * q.y,
+            //               r.x * r.x, r.y * r.y, 2.0 * r.x, 2.0 * r.y,
+            //               s.x * s.x, s.y * s.y, 2.0 * s.x, 2.0 * s.y);
+            mat4 A = mat4(p.x * p.x, p.y * p.y, p.x, p.y,
+                          q.x * q.x, q.y * q.y, q.x, q.y,
+                          2.0 * p.x * r.x, 2.0 * p.y * r.y, r.x, r.y,
+                          2.0 * q.x * s.x, 2.0 * q.y * s.y, s.x, s.y);
+            // Solve Ax = b for x
+            mat4 A_inv = inverse(transpose(A));
+            vec4 x = A_inv * b;
+            float offset = 1.0;
+            offset *= sign(x[0]);
+            x *= sign(x[0]);
+
+
+            // float A_ = x[0];
+            // float C = x[1];
+            // float D = x[2];
+            // float E = x[3];
+
+            float x_sc = scaling * gl_FragCoord.x;
+            float y_sc = scaling * gl_FragCoord.y;
+            float d =  x[0] * x_sc * x_sc
+                     + x[1] * y_sc * y_sc
+                     + x[2] * x_sc
+                     + x[3] * y_sc
+                     + offset;
+
+            // vec2 c = vec2(-D / A_, -E / C);
+            // vec2 a = vec2(sqrt(-1.0 / A_ + D * D / (A_ * A_) + E * E / (A_ * C)),
+            //               sqrt(-1.0 / A_ + D * D / (A_ * C) + E * E / (C * C)));
+
+            // vec2 a = sqrt(vec2(1.0 / A_, 1.0 / C));
+            // vec2 c = vec2(- 0.5 * B / A_, -0.5 * D / C);
+
+            // vec2 delta = (gl_FragCoord.xy * scaling - c) / a;
+            // float d = dot(delta, delta) - 1.0;
+            if (d < 0.0) {
+                fragColor = vec4(1.0);
+            }
+            // fragColor = vec4(vec3(1- d + 0.5), 1.0);
+        }
+
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
             float distance = length(gl_FragCoord.xy - point);
-            if (distance <= (i == nearestIndex ? 8.0 : 0.0)) {
+            if (distance <= (i == nearestIndex ? 8.0 : 5.0)) {
                 fragColor = vec4(
                     i == nearestIndex ? vec3(1.0, 0.5, 0.5) : vec3(1.0, 0.0, 0.0),
                     1.0);
