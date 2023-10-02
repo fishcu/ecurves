@@ -169,6 +169,32 @@ const char* fragmentShaderSource = R"(
         return -log2( res )/k;
     }
 
+    float cro(in vec2 a, in vec2 b) { return a.x * b.y - a.y * b.x; }
+    vec2 mvc(in vec2 p, in vec2 pa, in vec2 pb, in vec2 pc, in vec2 pd) {
+        vec2 sa = pa - p;
+        vec2 sb = pb - p;
+        vec2 sc = pc - p;
+        vec2 sd = pd - p;
+
+        vec4 r = vec4(length(sa), length(sb), length(sc), length(sd));
+        vec4 d = vec4(dot(sa, sb), dot(sb, sc), dot(sc, sd), dot(sd, sa));
+        vec4 a = vec4(cro(sa, sb), cro(sb, sc), cro(sc, sd), cro(sd, sa));
+
+        vec4 t = (r.xyzw * r.yzwx - d) / a;
+        vec4 u = (t.xyzw + t.wxyz) / r;
+
+        vec4 w = u / (u.x + u.y + u.z + u.w);
+
+        return w.yw + w.z;  // equivalent to the block below
+
+        /*
+        return vec2(0,0)*w.x +
+            vec2(1,0)*w.y +
+            vec2(1,1)*w.z +
+            vec2(0,1)*w.w;
+        */
+    }
+
     void main() {
         fragColor = vec4(0.0);
 
@@ -230,6 +256,8 @@ const char* fragmentShaderSource = R"(
         }
 #endif
 
+// Ellipse
+#if 0
         if (pointCount >= 4) {
             float scaling = 1.0/100.0;
             vec2 p = scaling * texelFetch(pointsTexture, 0).xy;
@@ -272,6 +300,25 @@ const char* fragmentShaderSource = R"(
             fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 300), vec2(16, 32), x[1], 5.0, 5.0));
             fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 200), vec2(16, 32), x[2], 5.0, 5.0));
             fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 100), vec2(16, 32), x[3], 5.0, 5.0));
+        }
+#endif 
+
+        if (pointCount >= 4) {
+            vec2 p = texelFetch(pointsTexture, 0).xy;
+            vec2 q = texelFetch(pointsTexture, 1).xy;
+            vec2 r = texelFetch(pointsTexture, 2).xy;
+            vec2 s = texelFetch(pointsTexture, 3).xy;
+
+            vec2 uv = mvc(gl_FragCoord.xy, p, q, r, s);
+    
+            // inside of quad if uv in [0..1]^2
+            if( max( abs(uv.x-0.5), abs(uv.y-0.5))<0.5 ) {
+                if (uv.x * uv.x + (uv.y - 0.5) * (uv.y - 0.5) / 0.25 < 1.0) {
+                    fragColor.rgb = vec3(1.0);
+                } else {
+                    fragColor.rgb = vec3(0.0);
+                }
+            }
         }
 
         for (int i = 0; i < pointCount; ++i) {
@@ -545,11 +592,11 @@ int main() {
                     printf("adding point at %f %f\n", mousePos.x, mousePos.y);
 
                     pointList.push_back(glm::vec2(mousePos.x, mousePos.y));
-                    std::stable_sort(
-                        pointList.begin(), pointList.end(),
-                        [](const glm::vec2& a, const glm::vec2& b) {
-                            return a.x < b.x;
-                        });
+                    // std::stable_sort(
+                    //     pointList.begin(), pointList.end(),
+                    //     [](const glm::vec2& a, const glm::vec2& b) {
+                    //         return a.x < b.x;
+                    //     });
 
                     glBindBuffer(GL_TEXTURE_BUFFER, tbo);
                     glBufferData(GL_TEXTURE_BUFFER,
@@ -575,11 +622,11 @@ int main() {
                     const auto nearestPointWhenClicked =
                         pointListNew[nearestIdxWhenClicked];
 
-                    std::stable_sort(
-                        pointListNew.begin(), pointListNew.end(),
-                        [](const glm::vec2& a, const glm::vec2& b) {
-                            return a.x < b.x;
-                        });
+                    // std::stable_sort(
+                    //     pointListNew.begin(), pointListNew.end(),
+                    //     [](const glm::vec2& a, const glm::vec2& b) {
+                    //         return a.x < b.x;
+                    //     });
 
                     for (int i = 0; i < pointList.size(); ++i) {
                         if (nearestPoint == pointListNew[i]) {
