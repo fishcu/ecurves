@@ -171,6 +171,8 @@ const char* fragmentShaderSource = R"(
 
     float cro(in vec2 a, in vec2 b) { return a.x * b.y - a.y * b.x; }
 
+    bool is_clockwise(vec2 a, vec2 b) { return cro(a, b) < 0.0; }
+
     vec2 mvc(in vec2 p, in vec2 pa, in vec2 pb, in vec2 pc, in vec2 pd) {
         vec2 sa = pa - p;
         vec2 sb = pb - p;
@@ -226,15 +228,36 @@ const char* fragmentShaderSource = R"(
         float r2 = lambda * lambda * dot(n, n);
         // if point is inside cone (p, c, q), return min dist. to p & q
         // else, return distance to radius.
-        n = lambda * perp(d);
-        float xc_d = distance(x, c);
-        float r = sqrt(r2);
-        if (dot(x - c, n) * r > dot(p - c, n) * xc_d) {
-            vec2 px = x - p;
-            vec2 qx = x - q;
-            return sqrt(min(dot(px, px), dot(qx, qx)));
+        vec2 a = p - c;
+        vec2 b = q - c;
+        bool a_to_b = is_clockwise(a, b);
+        x -= c;
+        bool x_to_a = is_clockwise(x, a);
+        bool x_to_b = is_clockwise(x, b);
+        // even-odd rule
+        float s = 1.0;
+        float y_on_circle = r2 - x.x * x.x;
+        if (y_on_circle > 0.0) {
+            // This also implies distance(x, c) <= radius
+            y_on_circle = sqrt(y_on_circle);
+            bool neg_c_to_a = is_clockwise(vec2(x.x, -y_on_circle), a);
+            bool neg_c_to_b = is_clockwise(vec2(x.x, -y_on_circle), b);
+            bool c_to_a = is_clockwise(vec2(x.x, y_on_circle), a);
+            bool c_to_b = is_clockwise(vec2(x.x, y_on_circle), b);
+            if (x.y < -y_on_circle &&
+                (neg_c_to_a != a_to_b && neg_c_to_b == a_to_b)) {
+                s = -s;
+            }
+            if (x.y < y_on_circle && (c_to_a != a_to_b && c_to_b == a_to_b)) {
+                s = -s;
+            }
         }
-        return abs(xc_d - r);
+        if (x_to_a != a_to_b && x_to_b == a_to_b) {
+            return abs(length(x) - sqrt(r2)) * s;
+        }
+        vec2 xa = x - a;
+        vec2 xb = x - b;
+        return sqrt(min(dot(xa, xa), dot(xb, xb))) * s;
     }
 
     void main() {
@@ -298,74 +321,6 @@ const char* fragmentShaderSource = R"(
         }
 #endif
 
-// Ellipse
-#if 0
-        if (pointCount >= 4) {
-            float scaling = 1.0/100.0;
-            vec2 p = scaling * texelFetch(pointsTexture, 0).xy;
-            vec2 q = scaling * texelFetch(pointsTexture, 3).xy;
-            
-            vec2 r = scaling * texelFetch(pointsTexture, 1).xy - p;
-            vec2 s = q - scaling * texelFetch(pointsTexture, 2).xy;
-
-            // Build LSE
-            mat4 A = mat4(p.x * p.x, p.y * p.y, p.x, p.y,
-                          q.x * q.x, q.y * q.y, q.x, q.y,
-                          2.0 * p.x * r.x, 2.0 * p.y * r.y, r.x, r.y,
-                          2.0 * q.x * s.x, 2.0 * q.y * s.y, s.x, s.y);
-             vec4 b = vec4(-1.0, -1.0, 0.0, 0.0);
-
-            // Solve Ax = b for x
-            mat4 A_inv = inverse(transpose(A));
-            vec4 x = A_inv * b;
-
-            // Normalize inside/outside
-            float offset = 1.0;
-            offset *= sign(x[0]);
-            x *= sign(x[0]);
-            offset *= sign(x[1]);
-            x *= sign(x[1]);
-
-            float x_sc = scaling * gl_FragCoord.x;
-            float y_sc = scaling * gl_FragCoord.y;
-            float d =  x[0] * x_sc * x_sc
-                     + x[1] * y_sc * y_sc
-                     + x[2] * x_sc
-                     + x[3] * y_sc
-                     + offset;
-            
-            if (/*sign(x[0]) == sign(x[1]) &&*/ d < 0.0) {
-                fragColor = vec4(1.0);
-            }
-
-            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 400), vec2(16, 32), x[0], 5.0, 5.0));
-            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 300), vec2(16, 32), x[1], 5.0, 5.0));
-            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 200), vec2(16, 32), x[2], 5.0, 5.0));
-            fragColor.rgb = mix(fragColor.rgb, vec3(1.0, 0.0, 0.0), PrintValue(vec2(gl_FragCoord.x, windowSize.y - gl_FragCoord.y), vec2(200, 100), vec2(16, 32), x[3], 5.0, 5.0));
-        }
-#endif 
-
-// Mean value coordinates
-#if 0
-        if (pointCount >= 4) {
-            vec2 p = texelFetch(pointsTexture, 0).xy;
-            vec2 q = texelFetch(pointsTexture, 1).xy;
-            vec2 r = texelFetch(pointsTexture, 2).xy;
-            vec2 s = texelFetch(pointsTexture, 3).xy;
-
-            vec2 uv = mvc(gl_FragCoord.xy, p, q, r, s);
-    
-            // inside of quad if uv in [0..1]^2
-            if( max( abs(uv.x-0.5), abs(uv.y-0.5))<0.5 ) {
-                if (uv.x * uv.x + (uv.y - 0.5) * (uv.y - 0.5) / 0.25 < 1.0) {
-                    fragColor.rgb = vec3(1.0);
-                } else {
-                    fragColor.rgb = vec3(0.0);
-                }
-            }
-        }
-#endif
-
         // biarc
         if (pointCount >= 4) {
             vec2 p0 = texelFetch(pointsTexture, 0).xy;
@@ -406,9 +361,11 @@ const char* fragmentShaderSource = R"(
             // sd = min(sd, arc_sdf(t, p1, center_1, radius_1, gl_FragCoord.xy));
 
             // Find arcs and evaluate SDF in one go
-            float sd = 1.0e10;
-            sd = min(sd, circle_arc_sdf(p0, t, t0, gl_FragCoord.xy));
-            sd = min(sd, circle_arc_sdf(p1, t, -t1, gl_FragCoord.xy));
+            float sd1 = circle_arc_sdf(p0, t, t0, gl_FragCoord.xy);
+            float sd2 = circle_arc_sdf(p1, t, -t1, gl_FragCoord.xy);
+            float sd = min(abs(sd1), abs(sd2));
+            float s = sign(sd1 * sd2);
+            sd = sd * s;
 
             // Draw curve
             fragColor.rgb = vec3(1.0 - smoothstep(2.0, 4.0, sd));
