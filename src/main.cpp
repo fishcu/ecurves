@@ -170,6 +170,7 @@ const char* fragmentShaderSource = R"(
     }
 
     float cro(in vec2 a, in vec2 b) { return a.x * b.y - a.y * b.x; }
+
     vec2 mvc(in vec2 p, in vec2 pa, in vec2 pb, in vec2 pc, in vec2 pd) {
         vec2 sa = pa - p;
         vec2 sb = pb - p;
@@ -193,6 +194,47 @@ const char* fragmentShaderSource = R"(
             vec2(1,1)*w.z +
             vec2(0,1)*w.w;
         */
+    }
+
+    vec2 perp(vec2 x) {
+        return vec2(x.y, -x.x);
+    }
+
+    // Circle from 2 points and tangent vector at p
+    void circ(vec2 p, vec2 q, vec2 t, out vec2 c, out float r2) {
+        vec2 n = perp(t);
+        vec2 d = q - p;
+        float lambda = 0.5 * dot(d, d) / dot(n, d);
+        c = p + lambda * n;
+        r2 = lambda * lambda * dot(n, n);
+    }
+
+    float arc_sdf(vec2 p, vec2 q, vec2 c, float radius2, vec2 x) {
+        if (cro(q - p, x - p) > 0.0) {
+            return min(distance(x, p), distance(x, q));
+        } else {
+            return min(min(distance(x, p), distance(x, q)), abs(distance(x, c) - sqrt(radius2)));
+        }
+    }
+
+    // Get SDF of circle arc while first constructing arc from two points and tangent vector
+    float circle_arc_sdf(vec2 p, vec2 q, vec2 t, vec2 x) {
+        vec2 n = perp(t);
+        vec2 d = q - p;
+        float lambda = 0.5 * dot(d, d) / dot(n, d);
+        vec2 c = p + lambda * n;
+        float r2 = lambda * lambda * dot(n, n);
+        // if point is inside cone (p, c, q), return min dist. to p & q
+        // else, return distance to radius.
+        n = lambda * perp(d);
+        float xc_d = distance(x, c);
+        float r = sqrt(r2);
+        if (dot(x - c, n) * r > dot(p - c, n) * xc_d) {
+            vec2 px = x - p;
+            vec2 qx = x - q;
+            return sqrt(min(dot(px, px), dot(qx, qx)));
+        }
+        return abs(xc_d - r);
     }
 
     void main() {
@@ -303,6 +345,8 @@ const char* fragmentShaderSource = R"(
         }
 #endif 
 
+// Mean value coordinates
+#if 0
         if (pointCount >= 4) {
             vec2 p = texelFetch(pointsTexture, 0).xy;
             vec2 q = texelFetch(pointsTexture, 1).xy;
@@ -319,6 +363,67 @@ const char* fragmentShaderSource = R"(
                     fragColor.rgb = vec3(0.0);
                 }
             }
+        }
+#endif
+
+        // biarc
+        if (pointCount >= 4) {
+            vec2 p0 = texelFetch(pointsTexture, 0).xy;
+            vec2 t0 = texelFetch(pointsTexture, 1).xy;
+            vec2 p1 = texelFetch(pointsTexture, 2).xy;
+            vec2 t1 = texelFetch(pointsTexture, 3).xy;
+
+            t0 -= p0;
+            t1 -= p1;
+
+            t0 = t0 / length(t0);
+            t1 = t1 / length(t1);
+
+            // chord given by points on circle
+            vec2 d = p0 - p1;
+            // vector along which center must lie
+            vec2 r = perp(d);
+            // center of circle describing locus of joint points
+            vec2 c = 0.5 * ((p0 + p1) + dot(d, t0 + t1) / dot(r, t0 - t1) * r);
+            vec2 p0_c = p0 - c;
+
+            // radius squared of circle describing locus of joint points
+            float r2 = dot(p0_c, p0_c);
+
+            // Joint point is chosen as intersection of chord bisector with circle
+            // The closer one is chosen, which gives good results for the tangents we care about.
+            vec2 t = c + sign(cro(p0_c, d)) * sqrt(r2) * r / length(r);
+
+            // Find both arcs
+            // float radius_0, radius_1;
+            // vec2 center_0, center_1;
+            // circ(p0, t, t0, center_0, radius_0);
+            // circ(p1, t, t1, center_1, radius_1);
+
+            // Evaluate SDF for rendering
+            // float sd = 1.0e10;
+            // sd = min(sd, arc_sdf(p0, t, center_0, radius_0, gl_FragCoord.xy));
+            // sd = min(sd, arc_sdf(t, p1, center_1, radius_1, gl_FragCoord.xy));
+
+            // Find arcs and evaluate SDF in one go
+            float sd = 1.0e10;
+            sd = min(sd, circle_arc_sdf(p0, t, t0, gl_FragCoord.xy));
+            sd = min(sd, circle_arc_sdf(p1, t, -t1, gl_FragCoord.xy));
+
+            // Draw curve
+            fragColor.rgb = vec3(1.0 - smoothstep(2.0, 4.0, sd));
+
+            // circle of joint points
+            // d = gl_FragCoord.xy - c;
+            // if (dot(d, d) <= r2) {
+            //     fragColor.rgb = vec3(1.0);
+            // }
+
+            // Highlight joint point
+            d = gl_FragCoord.xy - t;
+            if (dot(d, d) <= 16.0) {
+                fragColor.rgb = vec3(0.0, 0.0, 1.0);
+            }           
         }
 
         for (int i = 0; i < pointCount; ++i) {
@@ -353,7 +458,7 @@ int FindNearestPoint(const glm::vec2& position,
 
 struct App {
     GLFWwindow* window;
-    int width = 1600, height = 900;
+    int width = 1200, height = 675;
     float dpi_scale = 2.0;
 
     // Used for drawing full-screen quad
