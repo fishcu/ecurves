@@ -226,34 +226,38 @@ const char* fragmentShaderSource = R"(
         float lambda = 0.5 * dot(d, d) / dot(n, d);
         vec2 c = p + lambda * n;
         float r2 = lambda * lambda * dot(n, n);
-        // if point is inside cone (p, c, q), return min dist. to p & q
+        // If point is inside cone (p, c, q), return min dist. to p & q
         // else, return distance to radius.
         vec2 a = p - c;
         vec2 b = q - c;
-        bool a_to_b = is_clockwise(a, b);
         x -= c;
-        bool x_to_a = is_clockwise(x, a);
-        bool x_to_b = is_clockwise(x, b);
-        // even-odd rule
+        // Figure out sign of SDF by using even-odd rule.
+        // Redefine n to be the bisector of the triangle (p, c, q).
+        n = lambda * perp(d);
+        // This is missing |n|*|a| = |n|*r, but it often cancels out.
+        float cos_opening_angle = dot(n, a);
         float s = 1.0;
         float y_on_circle = r2 - x.x * x.x;
-        if (y_on_circle > 0.0) {
-            // This also implies distance(x, c) <= radius
+        if (y_on_circle >= 0.0) {
+            // This implies abs(x.x) < r.
             y_on_circle = sqrt(y_on_circle);
-            bool neg_c_to_a = is_clockwise(vec2(x.x, -y_on_circle), a);
-            bool neg_c_to_b = is_clockwise(vec2(x.x, -y_on_circle), b);
-            bool c_to_a = is_clockwise(vec2(x.x, y_on_circle), a);
-            bool c_to_b = is_clockwise(vec2(x.x, y_on_circle), b);
-            if (x.y < -y_on_circle &&
-                (neg_c_to_a != a_to_b && neg_c_to_b == a_to_b)) {
+            // Check if line drawn straight from x to infinity
+            // crosses the arc zero, one, or two times by checking if 
+            // intersection points of circle with line are on arc.
+            // alpha < beta => cos(alpha) > cos(beta)
+            if (x.y < -y_on_circle && dot(n, vec2(x.x, -y_on_circle)) < cos_opening_angle ) {
                 s = -s;
             }
-            if (x.y < y_on_circle && (c_to_a != a_to_b && c_to_b == a_to_b)) {
+            if (x.y < y_on_circle && dot(n, vec2(x.x, y_on_circle)) < cos_opening_angle) {
                 s = -s;
             }
         }
-        if (x_to_a != a_to_b && x_to_b == a_to_b) {
-            return abs(length(x) - sqrt(r2)) * s;
+        float dist_xc = length(x);
+        float r = sqrt(r2);
+        // Here's the only instance where the vector lengths in the
+        // comparison of dot products doesn't cancel out.
+        if (dot(n, x) * r < cos_opening_angle * dist_xc) {
+            return abs(dist_xc - r) * s;
         }
         vec2 xa = x - a;
         vec2 xb = x - b;
@@ -366,9 +370,10 @@ const char* fragmentShaderSource = R"(
             float sd = min(abs(sd1), abs(sd2));
             float s = sign(sd1 * sd2);
             sd = sd * s;
+            // sd = sd1;
 
             // Draw curve
-            fragColor.rgb = vec3(1.0 - smoothstep(2.0, 4.0, sd));
+            fragColor.rgb = vec3(1.0 - smoothstep(-1.0, 1.0, sd));
 
             // circle of joint points
             // d = gl_FragCoord.xy - c;
