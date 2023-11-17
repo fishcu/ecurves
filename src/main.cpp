@@ -133,70 +133,48 @@ const char* fragmentShaderSource = R"(
     }
 
     float line_polygon_sdf(in vec2 p0, in vec2 p1, in vec2 x) {
-        if (abs(p1.x - p0.x) < 1.0e-8) {
-            // return inf
-            return 1.0e20;
+        vec2 p = x - p0;
+        vec2 e = p1 - p0;
+        float h = clamp(dot(p, e) / dot(e, e), 0.0, 1.0);
+        float d = length(p - e * h);
+        float s = 1.0;
+        // even-odd rule
+        if ((p.x > 0.0) != (p.x > e.x)) {
+            if ((e.x * p.y < e.y * p.x) != (e.x < 0.0)) {
+                s = -s;
+            } 
         }
+        return d * s;
 
-        vec2 line = p1 - p0;
+        // if (abs(p1.x - p0.x) < 1.0e-8) {
+        //     // return inf
+        //     return 1.0e20;
+        // }
 
-        vec2 v0 = x - p0;
+        // vec2 line = p1 - p0;
 
-        vec2 pq0 = v0 - line * clamp(dot(v0, line) / dot(line, line), 0.0, 1.0);
+        // vec2 v0 = x - p0;
 
-        if (x.x >= p0.x && x.x < p1.x && pq0.y > 0.0) {
-            return -length(pq0);
-        }
+        // vec2 pq0 = v0 - line * clamp(dot(v0, line) / dot(line, line), 0.0, 1.0);
 
-        vec2 pq1 = x - vec2(p0.x, max(x.y, p0.y));
-        vec2 pq2 = x - vec2(p1.x, max(x.y, p1.y));
+        // if (x.x >= p0.x && x.x < p1.x && pq0.y > 0.0) {
+        //     return -length(pq0);
+        // }
 
-        float s = p0.x - p1.x;
-        vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * line.y - v0.y * line.x)),
-                        vec2(dot(pq1, pq1), s * (p0.x - x.x))),
-                    vec2(dot(pq2, pq2), s * (x.x - p1.x)));
+        // vec2 pq1 = x - vec2(p0.x, max(x.y, p0.y));
+        // vec2 pq2 = x - vec2(p1.x, max(x.y, p1.y));
 
-        return -sqrt(d.x) * (float(d.y > 0.0) * 2.0 - 1.0);
-    }
+        // float s = p0.x - p1.x;
+        // vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * line.y - v0.y * line.x)),
+        //                 vec2(dot(pq1, pq1), s * (p0.x - x.x))),
+        //             vec2(dot(pq2, pq2), s * (x.x - p1.x)));
 
-    float sminCubic( float a, float b, float k ) {
-        float h = max( k-abs(a-b), 0.0 )/k;
-        return min( a, b ) - h*h*h*k*(1.0/6.0);
-    }
-
-    float smin( float a, float b, float k ) {
-        float res = exp2( -k*a ) + exp2( -k*b );
-        return -log2( res )/k;
+        // return -sqrt(d.x) * (float(d.y > 0.0) * 2.0 - 1.0);
     }
 
     float cro(in vec2 a, in vec2 b) { return a.x * b.y - a.y * b.x; }
 
     bool is_clockwise(vec2 a, vec2 b) { return cro(a, b) < 0.0; }
-
-    vec2 mvc(in vec2 p, in vec2 pa, in vec2 pb, in vec2 pc, in vec2 pd) {
-        vec2 sa = pa - p;
-        vec2 sb = pb - p;
-        vec2 sc = pc - p;
-        vec2 sd = pd - p;
-
-        vec4 r = vec4(length(sa), length(sb), length(sc), length(sd));
-        vec4 d = vec4(dot(sa, sb), dot(sb, sc), dot(sc, sd), dot(sd, sa));
-        vec4 a = vec4(cro(sa, sb), cro(sb, sc), cro(sc, sd), cro(sd, sa));
-
-        vec4 t = (r.xyzw * r.yzwx - d) / a;
-        vec4 u = (t.xyzw + t.wxyz) / r;
-
-        vec4 w = u / (u.x + u.y + u.z + u.w);
-
-        return w.yw + w.z;  // equivalent to the block below
-
-        /*
-        return vec2(0,0)*w.x +
-            vec2(1,0)*w.y +
-            vec2(1,1)*w.z +
-            vec2(0,1)*w.w;
-        */
-    }
 
     vec2 perp(vec2 x) {
         return vec2(x.y, -x.x);
@@ -226,16 +204,61 @@ const char* fragmentShaderSource = R"(
         float lambda = 0.5 * dot(d, d) / dot(n, d);
         vec2 c = p + lambda * n;
         float r2 = lambda * lambda * dot(n, n);
+        // Early out: If circle is very large, return line SDF.
+        if (r2 > 1.e8) {
+            return line_polygon_sdf(p, q, x);
+        }
         // If point is inside cone (p, c, q), return min dist. to p & q
         // else, return distance to radius.
-        vec2 a = p - c;
-        vec2 b = q - c;
+        p -= c;
+        q -= c;
         x -= c;
         // Figure out sign of SDF by using even-odd rule.
+
+        // bool p_to_q = is_clockwise(t, d);
+        // float p_cross_q = cro(p, q);
+        // // even-odd rule
+        // float s = 1.0;
+        // float y_on_circle = r2 - x.x * x.x;
+        // if (y_on_circle >= 0.0) {
+        //     // This implies abs(x.x) < r
+        //     y_on_circle = sqrt(y_on_circle);
+        //     // bool p_to_neg_c = is_clockwise(p, vec2(x.x, -y_on_circle));
+        //     // bool neg_c_to_q = is_clockwise(vec2(x.x, -y_on_circle), q);
+        //     // bool p_to_c = is_clockwise(p, vec2(x.x, y_on_circle));
+        //     // bool c_to_q = is_clockwise(vec2(x.x, y_on_circle), q);
+        //     // if (x.y < -y_on_circle && (p_to_neg_c == p_to_q && neg_c_to_q == p_to_q) == p_to_q) {
+        //     //     s = -s;
+        //     // }
+        //     // if (x.y < y_on_circle && (p_to_c == p_to_q && c_to_q == p_to_q) == p_to_q) {
+        //     //     s = -s;
+        //     // }
+        //     float p_cross_neg_c = cro(p, vec2(x.x, -y_on_circle));
+        //     if (x.y < -y_on_circle &&
+        //             sign(p_cross_q) * sign(p_cross_neg_c) > 0.0 &&
+        //             abs(p_cross_neg_c) < abs(p_cross_q) ) {
+        //         s = -s;
+        //     }
+        //     float p_cross_c = cro(p, vec2(x.x, y_on_circle));
+        //     if (x.y < -y_on_circle &&
+        //             sign(p_cross_q) * sign(p_cross_c) > 0.0 &&
+        //             abs(p_cross_c) < abs(p_cross_q) ) {
+        //         s = -s;
+        //     }
+        // }
+        // float p_cross_x = cro(p, x) / length(x);
+        // if (sign(p_cross_q) * sign(p_cross_x) > 0.0 &&
+        //         abs(p_cross_x) < abs(p_cross_q) ) {
+        //     return abs(length(x) - sqrt(r2)) * s;
+        // }
+        // vec2 xa = x - p;
+        // vec2 xb = x - q;
+        // return sqrt(min(dot(xa, xa), dot(xb, xb))) * s;
+
         // Redefine n to be the bisector of the triangle (p, c, q).
         n = lambda * perp(d);
-        // This is missing |n|*|a| = |n|*r, but it often cancels out.
-        float cos_opening_angle = dot(n, a);
+        // This is missing |n|*|p| = |n|*r, but it often cancels out.
+        float cos_opening_angle = dot(n, p);
         float s = 1.0;
         float y_on_circle = r2 - x.x * x.x;
         if (y_on_circle >= 0.0) {
@@ -259,71 +282,13 @@ const char* fragmentShaderSource = R"(
         if (dot(n, x) * r < cos_opening_angle * dist_xc) {
             return abs(dist_xc - r) * s;
         }
-        vec2 xa = x - a;
-        vec2 xb = x - b;
+        vec2 xa = x - p;
+        vec2 xb = x - q;
         return sqrt(min(dot(xa, xa), dot(xb, xb))) * s;
     }
 
     void main() {
         fragColor = vec4(0.0);
-
-// Draw polygons
-#if 0
-        if (pointCount >= 2) {
-            float sq_size = 10.0;
-            vec4 sq = vec4(gl_FragCoord.x - sq_size * 0.5, gl_FragCoord.y - sq_size * 0.5, gl_FragCoord.x + sq_size * 0.5, gl_FragCoord.y + sq_size * 0.5);
-            float overlap = 0.0;
-            // if (gl_FragCoord.x < texelFetch(pointsTexture, 0).x) {
-            //     // All points are on the right of this fragment
-            //     vec2 p0 = texelFetch(pointsTexture, 0).xy;
-            //     vec2 p1 = texelFetch(pointsTexture, 1).xy;
-            //     vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
-            //     overlap += line_square_overlap(p0, p1, overlapping_square);
-            //     // overlap += 1.0 - smoothstep(-0.5 * sq_size, 0.5 * sq_size, line_polygon_sdf(p0, p1, gl_FragCoord.xy));
-            // } else if (gl_FragCoord.x >= texelFetch(pointsTexture, pointCount - 1).x) {
-            //     // All points on the left
-            //     vec2 p0 = texelFetch(pointsTexture, pointCount - 2).xy;
-            //     vec2 p1 = texelFetch(pointsTexture, pointCount - 1).xy;
-            //     vec4 overlapping_square = vec4(clamp(sq.x, p0.x, p1.x), sq.y, clamp(sq.z, p0.x, p1.x), sq.w);
-            //     overlap += line_square_overlap(p0, p1, overlapping_square);
-            //     // overlap += 1.0 - smoothstep(-0.5 * sq_size, 0.5 * sq_size, line_polygon_sdf(p0, p1, gl_FragCoord.xy));
-            // } else {
-
-                // Valid points on either side
-                float min_dist = 1.0e20;
-                float below = 1.0;
-                for (int i = 0; i < pointCount - 1; ++i) {
-                    vec2 p0 = texelFetch(pointsTexture, i).xy;
-                    vec2 p1 = texelFetch(pointsTexture, i + 1).xy;
-                    // overlap += line_square_overlap(p0, p1, sq);
-                    
-                    // min_dist = min(min_dist, line_polygon_sdf(p0, p1, gl_FragCoord.xy));
-
-                    float dist = line_segment_sdf(p0, p1, gl_FragCoord.xy);
-                    // if (min_dist > 0.0) {
-                        min_dist = min(min_dist, dist);
-                        // min_dist = smin(min_dist, dist, 0.01);
-                    // } else {
-                    //     if (dist < 0.0) {
-                    //         min_dist = max(min_dist, dist);
-                    //     }
-                    // }
-
-                    if (p0.x <= gl_FragCoord.x && p1.x > gl_FragCoord.x) {
-                        vec2 line = p1 - p0;
-                        vec2 x_p0 = gl_FragCoord.xy - p0;
-                        below = sign(x_p0.x * line.y - x_p0.y * line.x);
-                    }
-                }
-                // If below curve, use negative distance
-                min_dist *= below;
-                overlap = 1.0 - smoothstep(-0.5 * sq_size, 0.5 * sq_size, min_dist);
-                // overlap = clamp(1.0 - min_dist / sq_size, 0.0, 1.0);
-            // }
-            // fragColor = vec4(vec3(smoothstep(0.0, sq_size * sq_size, overlap)), 1.0);
-            fragColor = vec4(vec3(overlap), 1.0);
-        }
-#endif
 
         // biarc
         if (pointCount >= 4) {
