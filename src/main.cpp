@@ -352,12 +352,14 @@ const char* fragmentShaderSource = R"(
             // Highlight joint point
             d = gl_FragCoord.xy - t;
             if (dot(d, d) <= 16.0) {
-                fragColor.rgb = vec3(0.0, 0.0, 1.0);
+                fragColor = vec4(0.0, 0.0, 1.0, 1.0);
             }           
         }
 
         // Draw curve
-        fragColor.rgb = vec3(1.0 - smoothstep(-5.0, 5.0, s * d));
+        if (fragColor.a == 0.0) {
+            fragColor.rgb = vec3(1.0 - smoothstep(-5.0, 5.0, s * d));
+        }
 
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
