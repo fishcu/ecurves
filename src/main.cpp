@@ -291,11 +291,13 @@ const char* fragmentShaderSource = R"(
         fragColor = vec4(0.0);
 
         // biarc
-        if (pointCount >= 4) {
-            vec2 p0 = texelFetch(pointsTexture, 0).xy;
-            vec2 t0 = texelFetch(pointsTexture, 1).xy;
-            vec2 p1 = texelFetch(pointsTexture, 2).xy;
-            vec2 t1 = texelFetch(pointsTexture, 3).xy;
+        float d = float(0xffffffffU);
+        float s = 1.0;
+        for( int i=0; pointCount >= 4 && i< pointCount / 2 - 1; ++i) {
+            vec2 p0 = texelFetch(pointsTexture, i * 2).xy;
+            vec2 t0 = texelFetch(pointsTexture, i * 2 +1).xy;
+            vec2 p1 = texelFetch(pointsTexture, i * 2 +2).xy;
+            vec2 t1 = texelFetch(pointsTexture, i * 2 +3).xy;
 
             t0 -= p0;
             t1 -= p1;
@@ -331,14 +333,15 @@ const char* fragmentShaderSource = R"(
 
             // Find arcs and evaluate SDF in one go
             float sd1 = circle_arc_sdf(p0, t, t0, gl_FragCoord.xy);
+            d = min(d, abs(sd1));
+            s *= sign(sd1);
             float sd2 = circle_arc_sdf(p1, t, -t1, gl_FragCoord.xy);
-            float sd = min(abs(sd1), abs(sd2));
-            float s = sign(sd1 * sd2);
-            sd = sd * s;
+            d = min(d, abs(sd2));
+            s *= sign(sd2);
+            // float sd = min(abs(sd1), abs(sd2));
+            // float s = sign(sd1 * sd2);
+            // sd = sd * s;
             // sd = sd1;
-
-            // Draw curve
-            fragColor.rgb = vec3(1.0 - smoothstep(-1.0, 1.0, sd));
 
             // circle of joint points
             // d = gl_FragCoord.xy - c;
@@ -352,6 +355,9 @@ const char* fragmentShaderSource = R"(
                 fragColor.rgb = vec3(0.0, 0.0, 1.0);
             }           
         }
+
+        // Draw curve
+        fragColor.rgb = vec3(1.0 - smoothstep(-5.0, 5.0, s * d));
 
         for (int i = 0; i < pointCount; ++i) {
             vec2 point = texelFetch(pointsTexture, i).xy;
