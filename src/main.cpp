@@ -287,73 +287,56 @@ const char* fragmentShaderSource = R"(
         return sqrt(min(dot(xa, xa), dot(xb, xb))) * s;
     }
 
+    void biarc_sdf(vec2 p0, vec2 t0, vec2 p1, vec2 t1, inout float s, inout float d) {
+        // chord given by points on circle
+        vec2 chord = p0 - p1;
+        // vector along which center must lie
+        vec2 r = perp(chord);
+        // center of circle describing locus of joint points
+        vec2 c = 0.5 * ((p0 + p1) + dot(chord, t0 + t1) / dot(r, t0 - t1) * r);
+        vec2 p0_c = p0 - c;
+
+        // radius squared of circle describing locus of joint points
+        float r2 = dot(p0_c, p0_c);
+
+        // Joint point is chosen as intersection of chord bisector with circle
+        // The closer one is chosen, which gives good results for the tangents we care about.
+        vec2 t = c + sign(cro(p0_c, chord)) * sqrt(r2) * r / length(r);
+
+        // Find arcs and evaluate SDF in one go
+        float sd1 = circle_arc_sdf(p0, t, t0, gl_FragCoord.xy);
+        d = min(d, abs(sd1));
+        s *= sign(sd1);
+        float sd2 = circle_arc_sdf(p1, t, -t1, gl_FragCoord.xy);
+        d = min(d, abs(sd2));
+        s *= sign(sd2);
+    }
+
     void main() {
         fragColor = vec4(0.0);
 
         // biarc
         float d = float(0xffffffffU);
         float s = 1.0;
-        for( int i=0; pointCount >= 4 && i< pointCount / 2 - 1; ++i) {
-            vec2 p0 = texelFetch(pointsTexture, i * 2).xy;
-            vec2 t0 = texelFetch(pointsTexture, i * 2 +1).xy;
-            vec2 p1 = texelFetch(pointsTexture, i * 2 +2).xy;
-            vec2 t1 = texelFetch(pointsTexture, i * 2 +3).xy;
+        for(int i = 0; i < pointCount - 1; ++i) {
+            vec2 p0 = texelFetch(pointsTexture, i).xy;
+            vec2 p1 = texelFetch(pointsTexture, i + 1).xy;
 
-            t0 -= p0;
-            t1 -= p1;
+            vec2 pm1 = texelFetch(pointsTexture, max(i - 1, 0)).xy;
+            vec2 p2 = texelFetch(pointsTexture, min(pointCount - 1, i + 2)).xy;
+            vec2 t0 = p1 - pm1;
+            vec2 t1 = p2 - p0;
+            if (abs(t0.y) > 100.0) {
+                t0.y = sign(t0.y) * 100.0;
+            }
+            if (abs(t1.y) > 100.0) {
+                t1.y = sign(t1.y) * 100.0;
+            }
 
             t0 = t0 / length(t0);
             t1 = t1 / length(t1);
 
-            // chord given by points on circle
-            vec2 d = p0 - p1;
-            // vector along which center must lie
-            vec2 r = perp(d);
-            // center of circle describing locus of joint points
-            vec2 c = 0.5 * ((p0 + p1) + dot(d, t0 + t1) / dot(r, t0 - t1) * r);
-            vec2 p0_c = p0 - c;
-
-            // radius squared of circle describing locus of joint points
-            float r2 = dot(p0_c, p0_c);
-
-            // Joint point is chosen as intersection of chord bisector with circle
-            // The closer one is chosen, which gives good results for the tangents we care about.
-            vec2 t = c + sign(cro(p0_c, d)) * sqrt(r2) * r / length(r);
-
-            // Find both arcs
-            // float radius_0, radius_1;
-            // vec2 center_0, center_1;
-            // circ(p0, t, t0, center_0, radius_0);
-            // circ(p1, t, t1, center_1, radius_1);
-
-            // Evaluate SDF for rendering
-            // float sd = 1.0e10;
-            // sd = min(sd, arc_sdf(p0, t, center_0, radius_0, gl_FragCoord.xy));
-            // sd = min(sd, arc_sdf(t, p1, center_1, radius_1, gl_FragCoord.xy));
-
-            // Find arcs and evaluate SDF in one go
-            float sd1 = circle_arc_sdf(p0, t, t0, gl_FragCoord.xy);
-            d = min(d, abs(sd1));
-            s *= sign(sd1);
-            float sd2 = circle_arc_sdf(p1, t, -t1, gl_FragCoord.xy);
-            d = min(d, abs(sd2));
-            s *= sign(sd2);
-            // float sd = min(abs(sd1), abs(sd2));
-            // float s = sign(sd1 * sd2);
-            // sd = sd * s;
-            // sd = sd1;
-
-            // circle of joint points
-            // d = gl_FragCoord.xy - c;
-            // if (dot(d, d) <= r2) {
-            //     fragColor.rgb = vec3(1.0);
-            // }
-
-            // Highlight joint point
-            d = gl_FragCoord.xy - t;
-            if (dot(d, d) <= 16.0) {
-                fragColor = vec4(0.0, 0.0, 1.0, 1.0);
-            }           
+            biarc_sdf(p0, t0, p1, t1, s, d);         
         }
 
         // Draw curve
